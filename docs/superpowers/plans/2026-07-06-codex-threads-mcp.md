@@ -100,6 +100,6 @@
 
 - [x] Verify `gh api user --jq .login` is `dazman-codex`.
 - [x] Verify local git author is `dazman-codex`.
-- [ ] Commit implementation.
-- [ ] Push branch `codex/codex-threads-mcp` to the public fork.
-- [ ] If validation is clean, fast-forward fork `main` to the implementation commit and push.
+- [x] Commit implementation.
+- [x] Push branch `codex/codex-threads-mcp` to the public fork.
+- [x] If validation is clean, fast-forward fork `main` to the implementation commit and push.
