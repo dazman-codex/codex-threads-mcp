@@ -60,6 +60,19 @@ export interface SetSummaryRequest {
   summary: string;
 }
 
+export interface BindThreadRequest {
+  id: PeerId;
+  pid?: number;
+  thread_id: string;
+}
+
+export interface BindThreadResponse {
+  ok: boolean;
+  id?: PeerId;
+  thread_id?: string;
+  error?: string;
+}
+
 export interface ListPeersRequest {
   scope: "machine" | "directory" | "repo";
   // The requesting peer's context (used for filtering)

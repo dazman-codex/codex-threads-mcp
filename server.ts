@@ -21,6 +21,7 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type {
+  BindThreadResponse,
   PeerId,
   Peer,
   RegisterResponse,
@@ -47,6 +48,7 @@ const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
 const BRIDGE_SCRIPT = new URL("./codex-bridge.ts", import.meta.url).pathname;
 const CODEX_THREAD_ID = process.env.CODEX_THREAD_ID ?? "";
 const IS_CODEX = CODEX_THREAD_ID.length > 0;
+const ENABLE_CLAUDE_CHANNEL = process.env.CODEX_THREADS_ENABLE_CLAUDE_CHANNEL === "1";
 
 // --- Broker communication ---
 
@@ -99,8 +101,8 @@ async function ensureBroker(): Promise<void> {
   throw new Error("Failed to start broker daemon after 6 seconds");
 }
 
-async function ensureCodexBridge(): Promise<void> {
-  if (!IS_CODEX || process.env.CODEX_THREADS_AUTOSTART_BRIDGE === "0") {
+async function ensureCodexBridge(force = false): Promise<void> {
+  if ((!IS_CODEX && !force) || process.env.CODEX_THREADS_AUTOSTART_BRIDGE === "0") {
     return;
   }
 
@@ -178,10 +180,11 @@ Read the from_id, from_summary, and from_cwd attributes to understand who sent t
 Available tools:
 - list_peers: Discover other local Codex or Claude Code instances (scope: machine/directory/repo)
 - send_message: Send a message to another instance by ID
+- bind_thread: Bind this MCP peer to the current Codex thread id
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
 
-When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`,
+When you start in Codex, proactively call bind_thread with the current Codex thread id if you know it, then call set_summary to describe what you're working on. This helps other instances wake and understand your context.`,
   }
 );
 
@@ -203,6 +206,21 @@ const TOOLS = [
         },
       },
       required: ["scope"],
+    },
+  },
+  {
+    name: "bind_thread",
+    description:
+      "Bind this MCP peer to a Codex thread id so the bridge can wake this thread automatically. In Codex, pass the current CODEX_THREAD_ID value.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        thread_id: {
+          type: "string" as const,
+          description: "The Codex thread id to bind to this peer.",
+        },
+      },
+      required: ["thread_id"],
     },
   },
   {
@@ -361,6 +379,50 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             {
               type: "text" as const,
               text: `Error sending message: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    case "bind_thread": {
+      const { thread_id } = args as { thread_id: string };
+      if (!myId) {
+        return {
+          content: [{ type: "text" as const, text: "Not registered with broker yet" }],
+          isError: true,
+        };
+      }
+
+      try {
+        const result = await brokerFetch<BindThreadResponse>("/bind-thread", {
+          id: myId,
+          pid: process.pid,
+          thread_id,
+        });
+        if (!result.ok || !result.id || !result.thread_id) {
+          return {
+            content: [{ type: "text" as const, text: `Failed to bind: ${result.error}` }],
+            isError: true,
+          };
+        }
+        myId = result.id;
+        await ensureCodexBridge(true);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Bound peer ${myId} to Codex thread ${result.thread_id}`,
+            },
+          ],
+        };
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error binding thread: ${e instanceof Error ? e.message : String(e)}`,
             },
           ],
           isError: true,
@@ -559,7 +621,8 @@ async function main() {
 
   // 6. Start polling for inbound messages. Codex uses codex-bridge.ts instead
   // because the Claude channel notification is ignored by Codex.
-  const pollTimer = IS_CODEX ? null : setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+  const pollTimer =
+    !IS_CODEX && ENABLE_CLAUDE_CHANNEL ? setInterval(pollAndPushMessages, POLL_INTERVAL_MS) : null;
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {

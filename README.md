@@ -50,9 +50,28 @@ Adjust the paths if you cloned the repo somewhere else.
 | Tool | Description |
 | --- | --- |
 | `list_peers` | List local Codex or Claude peers by machine, directory, or repo. |
+| `bind_thread` | Bind the current MCP peer to a Codex thread id so it can be woken automatically. |
 | `send_message` | Send a message to a peer ID. Optional `conversation_id` continues an auto-reply chain. |
 | `set_summary` | Set a short visible summary for peer discovery. |
 | `check_messages` | Manually read queued messages when automatic delivery is unavailable. |
+
+## Codex usage
+
+Codex currently starts MCP servers from the app-server process, so the MCP process may not receive `CODEX_THREAD_ID` automatically. Bind each active thread once before using automatic wakeups:
+
+```text
+Use codex_threads.bind_thread with this thread id: <thread-id>
+Use codex_threads.set_summary: "what this thread is doing"
+Use codex_threads.list_peers with scope "machine"
+```
+
+You can get the current thread id from the Codex UI or from a shell in the thread:
+
+```bash
+echo "$CODEX_THREAD_ID"
+```
+
+After both threads are bound, `send_message` can wake the target thread through the bridge.
 
 ## Commands
 
@@ -62,6 +81,7 @@ bun run broker       # local broker only
 bun run bridge       # Codex wakeup bridge only
 bun cli.ts status    # broker status
 bun cli.ts peers     # list peers
+bun cli.ts bind <peer-id> <thread-id>
 bun cli.ts send <peer-id> <message>
 bun cli.ts kill-broker
 bun test
@@ -84,5 +104,5 @@ Legacy `CLAUDE_PEERS_PORT` and `CLAUDE_PEERS_DB` are still accepted as fallbacks
 ## Notes
 
 - The broker and bridge are localhost-only.
-- Codex thread IDs come from `CODEX_THREAD_ID`, which the Codex app exposes to running sessions.
+- Bind active Codex threads with `bind_thread` when the MCP process does not receive `CODEX_THREAD_ID`.
 - Claude Code channel delivery from the original project remains for non-Codex peers, but Codex uses the bridge because it does not consume `notifications/claude/channel`.

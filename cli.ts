@@ -8,6 +8,7 @@
  *   bun cli.ts status          — Show broker status and all peers
  *   bun cli.ts peers           — List all peers
  *   bun cli.ts send <id> <msg> — Send a message to a peer
+ *   bun cli.ts bind <id> <thread-id> — Bind a peer to a Codex thread
  *   bun cli.ts kill-broker     — Stop the broker daemon
  */
 
@@ -140,6 +141,34 @@ switch (cmd) {
     break;
   }
 
+  case "bind": {
+    const peerId = process.argv[3];
+    const threadId = process.argv[4];
+    if (!peerId || !threadId) {
+      console.error("Usage: bun cli.ts bind <peer-id> <thread-id>");
+      process.exit(1);
+    }
+    try {
+      const result = await brokerFetch<{
+        ok: boolean;
+        id?: string;
+        thread_id?: string;
+        error?: string;
+      }>("/bind-thread", {
+        id: peerId,
+        thread_id: threadId,
+      });
+      if (result.ok) {
+        console.log(`Peer ${peerId} bound to ${result.thread_id} as ${result.id}`);
+      } else {
+        console.error(`Failed: ${result.error}`);
+      }
+    } catch (e) {
+      console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    break;
+  }
+
   case "kill-broker": {
     try {
       const health = await brokerFetch<{ status: string; peers: number }>("/health");
@@ -168,5 +197,6 @@ Usage:
   bun cli.ts status          Show broker status and all peers
   bun cli.ts peers           List all peers
   bun cli.ts send <id> <msg> Send a message to a peer
+  bun cli.ts bind <id> <thread-id> Bind a peer to a Codex thread
   bun cli.ts kill-broker     Stop the broker daemon`);
 }

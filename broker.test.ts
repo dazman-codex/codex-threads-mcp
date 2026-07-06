@@ -230,3 +230,46 @@ test("keeps a stable peer id for repeated Codex registrations of the same thread
 
   expect(afterPrimaryExit.some((peer) => peer.id === primary.id)).toBe(false);
 });
+
+test("binds an existing peer to a Codex thread and rekeys it to a stable id", async () => {
+  const initial = await post<{ id: string }>("/register", {
+    pid: process.pid,
+    cwd: "/repo/unbound",
+    git_root: "/repo",
+    tty: null,
+    summary: "Unbound peer",
+  });
+
+  const bind = await post<{ ok: boolean; id: string; thread_id: string }>("/bind-thread", {
+    id: initial.id,
+    pid: process.pid,
+    thread_id: "thread-bound",
+  });
+
+  expect(bind.ok).toBe(true);
+  expect(bind.id).not.toBe(initial.id);
+  expect(bind.id).toHaveLength(8);
+  expect(bind.thread_id).toBe("thread-bound");
+
+  const peers = await post<
+    Array<{
+      id: string;
+      pid: number;
+      client_kind: string;
+      thread_id: string | null;
+      summary: string;
+    }>
+  >("/list-peers", {
+    scope: "machine",
+    cwd: "/",
+    git_root: null,
+  });
+
+  expect(peers.some((peer) => peer.id === initial.id)).toBe(false);
+  expect(peers.find((peer) => peer.id === bind.id)).toMatchObject({
+    pid: process.pid,
+    client_kind: "codex",
+    thread_id: "thread-bound",
+    summary: "Unbound peer",
+  });
+});

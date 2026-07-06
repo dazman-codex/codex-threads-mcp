@@ -12,6 +12,8 @@
 import { createHash } from "node:crypto";
 import { Database } from "bun:sqlite";
 import type {
+  BindThreadRequest,
+  BindThreadResponse,
   BridgeMarkDeliveredRequest,
   BridgePendingRequest,
   BridgePendingResponse,
@@ -139,6 +141,14 @@ const selectPeerById = db.prepare(`
   SELECT id, pid FROM peers WHERE id = ?
 `);
 
+const updatePeerThread = db.prepare(`
+  UPDATE peers SET client_kind = 'codex', thread_id = ?, last_seen = ? WHERE id = ?
+`);
+
+const updatePeerIdentity = db.prepare(`
+  UPDATE peers SET id = ?, client_kind = 'codex', thread_id = ?, last_seen = ? WHERE id = ?
+`);
+
 const selectAllPeers = db.prepare(`
   SELECT * FROM peers
 `);
@@ -164,6 +174,14 @@ const selectUndelivered = db.prepare(`
 
 const markDelivered = db.prepare(`
   UPDATE messages SET delivered = 1 WHERE id = ?
+`);
+
+const updateMessagesFromPeer = db.prepare(`
+  UPDATE messages SET from_id = ? WHERE from_id = ?
+`);
+
+const updateMessagesToPeer = db.prepare(`
+  UPDATE messages SET to_id = ? WHERE to_id = ?
 `);
 
 const countConversationMessages = db.prepare(`
@@ -267,6 +285,46 @@ function handleHeartbeat(body: HeartbeatRequest): void {
 
 function handleSetSummary(body: SetSummaryRequest): void {
   updateSummary.run(body.summary, body.id);
+}
+
+function handleBindThread(body: BindThreadRequest): BindThreadResponse {
+  const threadId = body.thread_id.trim();
+  if (!threadId) {
+    return { ok: false, error: "thread_id is required" };
+  }
+
+  const current = selectPeerById.get(body.id) as { id: string; pid: number } | null;
+  if (!current) {
+    return { ok: false, error: `Peer ${body.id} not found` };
+  }
+  if (body.pid !== undefined && current.pid !== body.pid) {
+    return { ok: false, error: `Peer ${body.id} belongs to a different process` };
+  }
+
+  const stableId = stableCodexPeerId(threadId);
+  const now = new Date().toISOString();
+  if (stableId === body.id) {
+    updatePeerThread.run(threadId, now, body.id);
+    return { ok: true, id: stableId, thread_id: threadId };
+  }
+
+  const existingStable = selectPeerById.get(stableId) as { id: string; pid: number } | null;
+  if (existingStable) {
+    if (isProcessAlive(existingStable.pid)) {
+      deletePeer.run(body.id);
+      return { ok: true, id: stableId, thread_id: threadId };
+    }
+    deletePeer.run(stableId);
+  }
+
+  const bindTransaction = db.transaction(() => {
+    updateMessagesFromPeer.run(stableId, body.id);
+    updateMessagesToPeer.run(stableId, body.id);
+    updatePeerIdentity.run(stableId, threadId, now, body.id);
+  });
+  bindTransaction();
+
+  return { ok: true, id: stableId, thread_id: threadId };
 }
 
 function handleListPeers(body: ListPeersRequest): Peer[] {
@@ -400,6 +458,8 @@ Bun.serve({
         case "/set-summary":
           handleSetSummary(body as SetSummaryRequest);
           return Response.json({ ok: true });
+        case "/bind-thread":
+          return Response.json(handleBindThread(body as BindThreadRequest));
         case "/list-peers":
           return Response.json(handleListPeers(body as ListPeersRequest));
         case "/send-message":
