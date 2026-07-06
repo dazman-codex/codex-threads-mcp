@@ -1,15 +1,17 @@
 {
-  "name": "claude-peers",
+  "name": "codex-threads-mcp",
   "version": "0.1.0",
-  "description": "Peer discovery and messaging for Claude Code instances",
+  "description": "Peer discovery and auto-reply messaging for local Codex threads",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "license": "MIT",
   "scripts": {
     "broker": "bun broker.ts",
+    "bridge": "bun codex-bridge.ts",
     "server": "bun server.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "latest"

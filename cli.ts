@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * claude-peers CLI
+ * codex-threads CLI
  *
  * Utility commands for managing the broker and inspecting peers.
  *
@@ -11,7 +11,10 @@
  *   bun cli.ts kill-broker     — Stop the broker daemon
  */
 
-const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
+const BROKER_PORT = parseInt(
+  process.env.CODEX_THREADS_PORT ?? process.env.CLAUDE_PEERS_PORT ?? "7899",
+  10
+);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 
 async function brokerFetch<T>(path: string, body?: unknown): Promise<T> {
@@ -50,6 +53,8 @@ switch (cmd) {
             git_root: string | null;
             tty: string | null;
             summary: string;
+            client_kind: string;
+            thread_id: string | null;
             last_seen: string;
           }>
         >("/list-peers", {
@@ -61,6 +66,8 @@ switch (cmd) {
         console.log("\nPeers:");
         for (const p of peers) {
           console.log(`  ${p.id}  PID:${p.pid}  ${p.cwd}`);
+          console.log(`         Client: ${p.client_kind}`);
+          if (p.thread_id) console.log(`         Codex thread: ${p.thread_id}`);
           if (p.summary) console.log(`         ${p.summary}`);
           if (p.tty) console.log(`         TTY: ${p.tty}`);
           console.log(`         Last seen: ${p.last_seen}`);
@@ -82,6 +89,8 @@ switch (cmd) {
           git_root: string | null;
           tty: string | null;
           summary: string;
+          client_kind: string;
+          thread_id: string | null;
           last_seen: string;
         }>
       >("/list-peers", {
@@ -95,6 +104,8 @@ switch (cmd) {
       } else {
         for (const p of peers) {
           const parts = [`${p.id}  PID:${p.pid}  ${p.cwd}`];
+          parts.push(`  Client: ${p.client_kind}`);
+          if (p.thread_id) parts.push(`  Codex thread: ${p.thread_id}`);
           if (p.summary) parts.push(`  Summary: ${p.summary}`);
           console.log(parts.join("\n"));
         }
@@ -151,7 +162,7 @@ switch (cmd) {
   }
 
   default:
-    console.log(`claude-peers CLI
+    console.log(`codex-threads CLI
 
 Usage:
   bun cli.ts status          Show broker status and all peers

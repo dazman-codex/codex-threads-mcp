@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-peers",
+      "name": "codex-threads-mcp",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.27.1",
       },

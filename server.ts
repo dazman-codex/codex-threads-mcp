@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
 /**
- * claude-peers MCP server
+ * codex-threads MCP server
  *
- * Spawned by Claude Code as a stdio MCP server (one per instance).
+ * Spawned by Codex or Claude Code as a stdio MCP server (one per instance).
  * Connects to the shared broker daemon for peer discovery and messaging.
- * Declares claude/channel capability to push inbound messages immediately.
+ * Uses codex-bridge.ts for Codex thread wakeups and claude/channel for
+ * Claude Code channel delivery.
  *
  * Usage:
- *   claude --dangerously-load-development-channels server:claude-peers
+ *   bun server.ts
  *
  * With .mcp.json:
- *   { "claude-peers": { "command": "bun", "args": ["./server.ts"] } }
+ *   { "codex-threads": { "command": "bun", "args": ["./server.ts"] } }
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -25,6 +26,7 @@ import type {
   RegisterResponse,
   PollMessagesResponse,
   Message,
+  SendMessageResponse,
 } from "./shared/types.ts";
 import {
   generateSummary,
@@ -34,11 +36,17 @@ import {
 
 // --- Configuration ---
 
-const BROKER_PORT = parseInt(process.env.CLAUDE_PEERS_PORT ?? "7899", 10);
+const BROKER_PORT = parseInt(
+  process.env.CODEX_THREADS_PORT ?? process.env.CLAUDE_PEERS_PORT ?? "7899",
+  10
+);
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
 const POLL_INTERVAL_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const BROKER_SCRIPT = new URL("./broker.ts", import.meta.url).pathname;
+const BRIDGE_SCRIPT = new URL("./codex-bridge.ts", import.meta.url).pathname;
+const CODEX_THREAD_ID = process.env.CODEX_THREAD_ID ?? "";
+const IS_CODEX = CODEX_THREAD_ID.length > 0;
 
 // --- Broker communication ---
 
@@ -71,7 +79,7 @@ async function ensureBroker(): Promise<void> {
   }
 
   log("Starting broker daemon...");
-  const proc = Bun.spawn(["bun", BROKER_SCRIPT], {
+  const proc = Bun.spawn([process.execPath, BROKER_SCRIPT], {
     stdio: ["ignore", "ignore", "inherit"],
     // Detach so the broker survives if this MCP server exits
     // On macOS/Linux, the broker will keep running
@@ -91,11 +99,24 @@ async function ensureBroker(): Promise<void> {
   throw new Error("Failed to start broker daemon after 6 seconds");
 }
 
+async function ensureCodexBridge(): Promise<void> {
+  if (!IS_CODEX || process.env.CODEX_THREADS_AUTOSTART_BRIDGE === "0") {
+    return;
+  }
+
+  log("Starting Codex bridge daemon...");
+  const proc = Bun.spawn([process.execPath, BRIDGE_SCRIPT], {
+    stdio: ["ignore", "ignore", "inherit"],
+    env: process.env,
+  });
+  proc.unref();
+}
+
 // --- Utility ---
 
 function log(msg: string) {
   // MCP stdio servers must only use stderr for logging (stdout is the MCP protocol)
-  console.error(`[claude-peers] ${msg}`);
+  console.error(`[codex-threads] ${msg}`);
 }
 
 async function getGitRoot(cwd: string): Promise<string | null> {
@@ -142,20 +163,20 @@ let myGitRoot: string | null = null;
 // --- MCP Server ---
 
 const mcp = new Server(
-  { name: "claude-peers", version: "0.1.0" },
+  { name: "codex-threads", version: "0.1.0" },
   {
     capabilities: {
       experimental: { "claude/channel": {} },
       tools: {},
     },
-    instructions: `You are connected to the claude-peers network. Other Claude Code instances on this machine can see you and send you messages.
+    instructions: `You are connected to the codex-threads network. Other local Codex or Claude Code instances on this machine can see you and send you messages.
 
-IMPORTANT: When you receive a <channel source="claude-peers" ...> message, RESPOND IMMEDIATELY. Do not wait until your current task is finished. Pause what you are doing, reply to the message using send_message, then resume your work. Treat incoming peer messages like a coworker tapping you on the shoulder — answer right away, even if you're in the middle of something.
+IMPORTANT: When you receive a peer message, RESPOND IMMEDIATELY. Do not wait until your current task is finished. Pause what you are doing, reply to the message using send_message, then resume your work.
 
 Read the from_id, from_summary, and from_cwd attributes to understand who sent the message. Reply by calling send_message with their from_id.
 
 Available tools:
-- list_peers: Discover other Claude Code instances (scope: machine/directory/repo)
+- list_peers: Discover other local Codex or Claude Code instances (scope: machine/directory/repo)
 - send_message: Send a message to another instance by ID
 - set_summary: Set a 1-2 sentence summary of what you're working on (visible to other peers)
 - check_messages: Manually check for new messages
@@ -170,7 +191,7 @@ const TOOLS = [
   {
     name: "list_peers",
     description:
-      "List other Claude Code instances running on this machine. Returns their ID, working directory, git repo, and summary.",
+      "List other local Codex or Claude Code instances running on this machine. Returns their ID, working directory, git repo, thread metadata, and summary.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -187,17 +208,22 @@ const TOOLS = [
   {
     name: "send_message",
     description:
-      "Send a message to another Claude Code instance by peer ID. The message will be pushed into their session immediately via channel notification.",
+      "Send a message to another local peer by peer ID. Codex peers are woken through their Codex thread; Claude peers use channel notification.",
     inputSchema: {
       type: "object" as const,
       properties: {
         to_id: {
           type: "string" as const,
-          description: "The peer ID of the target Claude Code instance (from list_peers)",
+          description: "The peer ID of the target local peer (from list_peers)",
         },
         message: {
           type: "string" as const,
           description: "The message to send",
+        },
+        conversation_id: {
+          type: "string" as const,
+          description:
+            "Optional conversation id to continue an existing auto-reply conversation.",
         },
       },
       required: ["to_id", "message"],
@@ -206,7 +232,7 @@ const TOOLS = [
   {
     name: "set_summary",
     description:
-      "Set a brief summary (1-2 sentences) of what you are currently working on. This is visible to other Claude Code instances when they list peers.",
+      "Set a brief summary (1-2 sentences) of what you are currently working on. This is visible to other local peers when they list peers.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -221,7 +247,7 @@ const TOOLS = [
   {
     name: "check_messages",
     description:
-      "Manually check for new messages from other Claude Code instances. Messages are normally pushed automatically via channel notifications, but you can use this as a fallback.",
+      "Manually check for new messages from other local peers. This is a fallback when automatic delivery is disabled or unavailable.",
     inputSchema: {
       type: "object" as const,
       properties: {},
@@ -254,7 +280,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             content: [
               {
                 type: "text" as const,
-                text: `No other Claude Code instances found (scope: ${scope}).`,
+                text: `No other local peers found (scope: ${scope}).`,
               },
             ],
           };
@@ -266,6 +292,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
             `PID: ${p.pid}`,
             `CWD: ${p.cwd}`,
           ];
+          parts.push(`Client: ${p.client_kind ?? "unknown"}`);
+          if (p.thread_id) parts.push(`Codex thread: ${p.thread_id}`);
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${p.summary}`);
@@ -295,7 +323,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     case "send_message": {
-      const { to_id, message } = args as { to_id: string; message: string };
+      const { to_id, message, conversation_id } = args as {
+        to_id: string;
+        message: string;
+        conversation_id?: string;
+      };
       if (!myId) {
         return {
           content: [{ type: "text" as const, text: "Not registered with broker yet" }],
@@ -303,10 +335,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
       try {
-        const result = await brokerFetch<{ ok: boolean; error?: string }>("/send-message", {
+        const result = await brokerFetch<SendMessageResponse>("/send-message", {
           from_id: myId,
           to_id,
           text: message,
+          conversation_id,
         });
         if (!result.ok) {
           return {
@@ -315,7 +348,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           };
         }
         return {
-          content: [{ type: "text" as const, text: `Message sent to peer ${to_id}` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Message sent to peer ${to_id} (conversation: ${result.conversation_id}, sequence: ${result.sequence}, remaining messages: ${result.remaining_messages})`,
+            },
+          ],
         };
       } catch (e) {
         return {
@@ -453,6 +491,7 @@ async function pollAndPushMessages() {
 async function main() {
   // 1. Ensure broker is running
   await ensureBroker();
+  await ensureCodexBridge();
 
   // 2. Gather context
   myCwd = process.cwd();
@@ -494,6 +533,8 @@ async function main() {
     git_root: myGitRoot,
     tty,
     summary: initialSummary,
+    client_kind: IS_CODEX ? "codex" : "claude",
+    thread_id: IS_CODEX ? CODEX_THREAD_ID : null,
   });
   myId = reg.id;
   log(`Registered as peer ${myId}`);
@@ -516,8 +557,9 @@ async function main() {
   await mcp.connect(new StdioServerTransport());
   log("MCP connected");
 
-  // 6. Start polling for inbound messages
-  const pollTimer = setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
+  // 6. Start polling for inbound messages. Codex uses codex-bridge.ts instead
+  // because the Claude channel notification is ignored by Codex.
+  const pollTimer = IS_CODEX ? null : setInterval(pollAndPushMessages, POLL_INTERVAL_MS);
 
   // 7. Start heartbeat
   const heartbeatTimer = setInterval(async () => {
@@ -532,11 +574,11 @@ async function main() {
 
   // 8. Clean up on exit
   const cleanup = async () => {
-    clearInterval(pollTimer);
+    if (pollTimer) clearInterval(pollTimer);
     clearInterval(heartbeatTimer);
     if (myId) {
       try {
-        await brokerFetch("/unregister", { id: myId });
+        await brokerFetch("/unregister", { id: myId, pid: process.pid });
         log("Unregistered from broker");
       } catch {
         // Best effort

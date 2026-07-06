@@ -1,4 +1,4 @@
-// Unique ID for each Claude Code instance (generated on registration)
+// Unique ID for each local peer (generated on registration)
 export type PeerId = string;
 
 export interface Peer {
@@ -8,17 +8,31 @@ export interface Peer {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  client_kind: "claude" | "codex" | "unknown";
+  thread_id: string | null;
   registered_at: string; // ISO timestamp
   last_seen: string; // ISO timestamp
 }
 
 export interface Message {
   id: number;
+  conversation_id: string;
+  sequence: number;
   from_id: PeerId;
   to_id: PeerId;
   text: string;
   sent_at: string; // ISO timestamp
   delivered: boolean;
+  bridge_delivered: boolean;
+}
+
+export interface BridgePendingMessage extends Message {
+  from_summary: string;
+  from_cwd: string;
+  from_thread_id: string | null;
+  to_summary: string;
+  to_cwd: string;
+  to_thread_id: string;
 }
 
 // --- Broker API types ---
@@ -29,6 +43,8 @@ export interface RegisterRequest {
   git_root: string | null;
   tty: string | null;
   summary: string;
+  client_kind?: "claude" | "codex" | "unknown";
+  thread_id?: string | null;
 }
 
 export interface RegisterResponse {
@@ -56,6 +72,15 @@ export interface SendMessageRequest {
   from_id: PeerId;
   to_id: PeerId;
   text: string;
+  conversation_id?: string;
+}
+
+export interface SendMessageResponse {
+  ok: boolean;
+  error?: string;
+  conversation_id?: string;
+  sequence?: number;
+  remaining_messages?: number;
 }
 
 export interface PollMessagesRequest {
@@ -64,4 +89,16 @@ export interface PollMessagesRequest {
 
 export interface PollMessagesResponse {
   messages: Message[];
+}
+
+export interface BridgePendingRequest {
+  limit?: number;
+}
+
+export interface BridgePendingResponse {
+  messages: BridgePendingMessage[];
+}
+
+export interface BridgeMarkDeliveredRequest {
+  id: number;
 }

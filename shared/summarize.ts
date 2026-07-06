@@ -1,5 +1,5 @@
 /**
- * Generate a 1-2 sentence summary of what a Claude Code instance is likely
+ * Generate a 1-2 sentence summary of what a local agent instance is likely
  * working on, based on its working directory and git context.
  *
  * Uses OpenAI's gpt-5.4-nano for cheap, fast inference.

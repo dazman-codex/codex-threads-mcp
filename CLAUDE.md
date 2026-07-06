@@ -4,14 +4,15 @@ globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
 alwaysApply: false
 ---
 
-# claude-peers
+# codex-threads-mcp
 
-Peer discovery and messaging MCP channel for Claude Code instances.
+Peer discovery and auto-reply messaging MCP for local Codex threads.
 
 ## Architecture
 
 - `broker.ts` — Singleton HTTP daemon on localhost:7899 + SQLite. Auto-launched by the MCP server.
-- `server.ts` — MCP stdio server, one per Claude Code instance. Connects to broker, exposes tools, pushes channel notifications.
+- `server.ts` — MCP stdio server, one per Codex or Claude Code instance. Connects to broker and exposes tools.
+- `codex-bridge.ts` — Local bridge that wakes Codex threads with `codex exec resume`.
 - `shared/types.ts` — Shared TypeScript types for broker API.
 - `shared/summarize.ts` — Auto-summary generation via gpt-5.4-nano.
 - `cli.ts` — CLI utility for inspecting broker state.
@@ -19,11 +20,10 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 ## Running
 
 ```bash
-# Start Claude Code with the channel:
-claude --dangerously-load-development-channels server:claude-peers
+# Register in Codex as an MCP server named codex_threads.
 
-# Or just add to .mcp.json and use as regular MCP (no channel push, but tools work):
-# { "claude-peers": { "command": "bun", "args": ["./server.ts"] } }
+# Start the server manually:
+bun server.ts
 
 # CLI:
 bun cli.ts status
